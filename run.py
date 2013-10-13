@@ -46,6 +46,7 @@ class WebSocketServer:
             print "ERROR: server.config not found"
             return
         
+        
         HOST = self.overrideHost if self.overrideHost is not None else self.config.get('server', 'host')
         PORT = self.overridePort if self.overridePort is not None else self.config.getint('server', 'port')
         ADDR = (HOST, PORT)
@@ -69,6 +70,7 @@ class WebSocketServer:
                 response, close, serviceRecord = self.handshake(request)
                 conn.send(response)
                 if close:
+                    print close
                     print "Invalid request from", addr
                     conn.close()
                     continue
@@ -127,36 +129,44 @@ class WebSocketServer:
         #the first line should contain their request
         heading = lines[0].split()
         if len(heading) != 3:
-            close = True
+            close = "badhead"
             response += HTTP_BAD_REQUEST + "\r\n"
         elif heading[0] != HTTP_METHOD:
             #they did something other than a get request
             print heading[0]
-            close = True
+            close = "badmeth"
             response += HTTP_METHOD_NOT_ALLOWED + "\r\n"
         elif heading[2] != HTTP_VERSION:
             #they didn't say HTTP/1.1
             print heading[2]
-            close = True
+            close = "badver"
             response += HTTP_BAD_REQUEST + "\r\n"
         if close:
             #we are done here
             return response, close, service
+			
         #find out if the service they want to contact exists
         location = heading[1].split('/')
         if location[0] == "":
             location.pop(0) #remove the empty string
+        elif "ws" in location[0]:
+            location.pop(0)
+            location.pop(0)
+            location.pop(0)
+            
         if location[-1] == "":
             #we need to append the "index" script to the location
             location[-1] = SERVICE_INDEX_NAME
         if location[-1][-3:] != ".py":
             location[-1] += ".py"
+
         service = self.getService(location)
         if service is None:
             #we are done
-            close = True
+            close = "notfound"
             response += HTTP_NOT_FOUND + "\r\n"
-            return response, close, service
+            return response, close, service        
+        
         #now go through their headers
         headers = {}
         for line in lines:
@@ -167,16 +177,17 @@ class WebSocketServer:
             headers[header[0].strip()] = header[1].strip()
         if "Upgrade" not in headers or "Sec-WebSocket-Version" not in headers or "Sec-WebSocket-Key" not in headers:
             #they need to have certain headers
-            close = True
+            close = "badver2"
             response += HTTP_BAD_REQUEST + "\r\n"
         elif headers["Upgrade"] != "websocket":
             #we need to ugprade to a web socket
-            close = True
+            close = "upgrade"
             response += HTTP_BAD_REQUEST + "\r\n"
         elif headers["Sec-WebSocket-Version"] != WEBSOCKET_VERSION:
             #this is built for version 13
-            close = True
-            response += HTTP_NOT_IMPLEMENTED + "\r\n"
+            #close = headers["Sec-WebSocket-Version"]
+            #response += HTTP_NOT_IMPLEMENTED + "\r\n"
+            pass
         if close:
             #we are done here
             return response, close, service
