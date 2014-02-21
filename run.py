@@ -1,3 +1,4 @@
+#!/usr/bin/python
 """Main file for the web socket server. This should be run to start the server
 up"""
 

@@ -12,12 +12,13 @@ class Client:
     STATE_INITIALIZE = 0
     STATE_FOLLOWING = 1
     STATE_SERVER = 2
-    def __init__(self, addr, socketId, sendQueue, stream):
+    def __init__(self, addr, socketId, service):
         self.address = addr
         self.socketId = socketId
-        self.sendQueue = sendQueue
+        self.sendQueue = service.sendQueue
         
-        self.stream = stream
+        self.stream = service.stream
+        self.service = service
         self.subscriptionId = None
         self.state = Client.STATE_INITIALIZE
         data = {"type" : "query", "query" : "mode"}
@@ -48,6 +49,7 @@ class Client:
                     self.state = Client.STATE_FOLLOWING
                     self.subscriptionId = self.stream.subscribe(self)
                     print "Anonymous user now listening."
+                    self.stream.newEvent(Stream.StreamEvent(Stream.StreamEvent.EV_LISTENERS, {'listeners': len(self.service.clients)}))
                     return
                 elif data["mode"] == "server":
                     #The server is connecting
@@ -94,6 +96,9 @@ class Client:
         elif event.eventId == Stream.StreamEvent.EV_NEXT:
             #Song has ended. Tell users to update their song
             data = { 'type' : 'event', 'event' : { 'type' : 'event', 'event' : 'next', 'song' : event.data } }
+        elif event.eventId == Stream.StreamEvent.EV_LISTENERS:
+            #Number of listeners has changed
+            data = { 'type' : 'event', 'event' : { 'type' : 'event', 'event' : 'listeners', 'listeners' : event.data } }
         transaction = WebSocketTransaction(WebSocketTransaction.TRANSACTION_DATA, self.socketId, json.dumps(data))
         self.sendQueue.put(transaction)
                         
@@ -104,11 +109,13 @@ class Stream(Services.Subscribable):
         EV_DELETE = 1
         EV_VOTE = 2
         EV_NEXT = 3
+        EV_LISTENERS = 4
         def __init__(self, eventId, data):
             """Creates a new radio event.
             type: A value matching one of the EV_ variables in this class
             data: Data to go along with the event. If a message event, it will contain the tuple with the message data.
                   If a new subscriber event, it contains the new subscriber's name"""
+            print data
             Services.Subscribable.SubscriptionEvent.__init__(self, eventId, data)
     
     def __init__(self, service):
@@ -128,9 +135,9 @@ class Stream(Services.Subscribable):
         #event = Stream.StreamEvent(Stream.StreamEvent.EV_UNSUBSCRIBE, (name, self.getNumSubscribers()))
         #self.sendEvent(event)
         
-    def newEvent(self, data):
+    def newEvent(self, event):
         """Creates a stream event. Only called by the server"""
-        event = Stream.StreamEvent(data.eventId, data.data)
+        #event = Stream.StreamEvent(data.eventId, data.data)
         self.sendEvent(event)
 
 class Service(Services.Service):
@@ -163,8 +170,11 @@ class Service(Services.Service):
                     if transaction.transactionType == WebSockets.WebSocketTransaction.TRANSACTION_NEWSOCKET:
                         #we have a new client!
                         print "Got client from", transaction.data
-                        client = Client(transaction.data, transaction.socketId, self.sendQueue, self.stream)
+                        client = Client(transaction.data, transaction.socketId, self)
                         self.clients[client.socketId] = client
+                    elif transaction.transactionType == WebSockets.WebSocketTransaction.TRANSACTION_CLOSE:
+                        print "Client removed"
+                        del self.clients[transaction.socketId]
                     else:
                         #find the client to send this to
                         self.clients[transaction.socketId].injectReceived(transaction)
